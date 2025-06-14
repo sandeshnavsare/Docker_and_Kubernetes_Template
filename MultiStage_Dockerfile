@@ -1,0 +1,37 @@
+#Step 1 : Build an app -----------------------------------------------------------------
+FROM maven:3.9-eclipse-temurin-17 AS builder
+#Create a work directory
+WORKDIR /app
+#Copy the dependecy file first
+COPY POM.xml
+COPY src ./src
+#Build the project
+RUN mvn clean package -DskipTest
+
+#Step 2 : Run the app -------------------------------------------------------------
+FROM eclipse-temurin:17-jre-jammy
+
+#Create a non-root-user
+RUN useradd -ms /bin/bash appuser
+
+WORKDIR /app
+#Copy the jar from builder
+COPY --from=builder /app/target/*.jar /app/app.jar
+
+#set permission to the non-root user and switch user
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Set optimized JVM options for containerized environments
+ENV JAVA_OPTS=\
+  -XX:UseContainerSupport \
+  -XX:MaxRAMPercentage=75.0 \
+  -XX:ExitOnOutOfMemoryError \
+  -XX:PrintGCDetails \
+  -XX:PrintGCTimeStamp"
+
+#Run the Container now 
+ENTRYPOINT ["sh", "-c"]
+CMD [java $JAVA-OPTS -jar /app/app.jar]
+
+
