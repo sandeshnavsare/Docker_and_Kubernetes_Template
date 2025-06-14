@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: shop-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    matadata:
+      labels:
+        app: order-service
+  spec:
+    containers:
+      - name: order-service
+        image: sandesh/order-service:latest
+        ports:
+          - containerPort: 8000
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8000
+          initailDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8000
+          initailDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 1
+          failureThreshold: 3
