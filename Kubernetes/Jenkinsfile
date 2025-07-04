@@ -1,0 +1,92 @@
+pipeline {
+  agent any
+
+  environment {
+    IMAGE_NAME = "my-java-app"
+    IMAGE_TAG = "${BUILD_NUMBER}"
+    ECR_REPO = "<your-ecr-repo-url>"  // e.g. 123456789.dkr.ecr.us-east-1.amazonaws.com/my-java-app
+  }
+
+  stages {
+
+    stage('Checkout Code') {
+      steps {
+        git url: 'https://github.com/org/my-java-service.git'
+      }
+    }
+
+    stage('Unit Tests') {
+      steps {
+        sh 'mvn clean test'
+      }
+      post {
+        always {
+          junit 'target/surefire-reports/*.xml'
+        }
+      }
+    }
+
+    stage('Code Quality Scan (SonarQube)') {
+      steps {
+        withSonarQubeEnv('SonarQubeServer') {
+          sh 'mvn sonar:sonar'
+        }
+      }
+    }
+
+    stage('Docker Build (Multi-Stage)') {
+      steps {
+        sh """
+          docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+        """
+      }
+    }
+
+    stage('Push to ECR') {
+      steps {
+        script {
+          sh """
+            aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${ECR_REPO}
+            docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REPO}:${IMAGE_TAG}
+            docker push ${ECR_REPO}:${IMAGE_TAG}
+          """
+        }
+      }
+    }
+
+    stage('Deploy to QA (EKS)') {
+      steps {
+        sh """
+          sed -i "s|IMAGE_TAG|${IMAGE_TAG}|g" k8s/deployment.yaml
+          kubectl apply -f k8s/deployment.yaml --namespace=qa
+        """
+      }
+    }
+
+    stage('Run Selenium Sanity Tests') {
+      steps {
+        git url: 'https://github.com/org/qa-sanity-tests.git'
+        sh 'mvn test'  // assumes Selenium + TestNG based project
+      }
+      post {
+        always {
+          junit 'target/surefire-reports/*.xml'
+          publishHTML(target: [
+            reportDir: 'target',
+            reportFiles: 'sanity-report.html',
+            reportName: 'Sanity Report'
+          ])
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      slackSend channel: '#ci-alerts', message: "✅ Build #${BUILD_NUMBER} SUCCESS: App deployed to QA with image tag ${IMAGE_TAG}"
+    }
+    failure {
+      slackSend channel: '#ci-alerts', message: "❌ Build #${BUILD_NUMBER} FAILED. Check Jenkins job: ${env.BUILD_URL}"
+    }
+  }
+}
